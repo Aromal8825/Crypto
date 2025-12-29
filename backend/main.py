@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import requests
 try:
     import pandas as pd
@@ -14,8 +15,30 @@ from datetime import datetime, timedelta
 import asyncio
 from typing import List, Dict, Optional
 import json
+from auth import AuthService, get_current_active_user, ACCESS_TOKEN_EXPIRE_MINUTES
 
 app = FastAPI(title="Crypto Dashboard API", version="1.0.0")
+
+# Pydantic models for authentication
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    full_name: str
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: dict
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    full_name: str
+    is_active: bool
 
 # CORS middleware
 app.add_middleware(
@@ -25,6 +48,85 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Authentication endpoints
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def login(login_data: LoginRequest):
+    """Authenticate user and return JWT token"""
+    user = AuthService.authenticate_user(login_data.email, login_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = AuthService.create_access_token(
+        data={"sub": user["email"]}, expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "is_active": user["is_active"]
+        }
+    }
+
+@app.post("/api/auth/register", response_model=LoginResponse)
+async def register(register_data: RegisterRequest):
+    """Register a new user and return JWT token"""
+    # Check if user already exists
+    if AuthService.get_user_by_email(register_data.email):
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered",
+        )
+    
+    # Validate password length
+    if len(register_data.password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 6 characters long",
+        )
+    
+    # Create new user
+    new_user = AuthService.create_user(
+        email=register_data.email,
+        password=register_data.password,
+        full_name=register_data.full_name
+    )
+    
+    # Generate JWT token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = AuthService.create_access_token(
+        data={"sub": new_user["email"]}, expires_delta=access_token_expires
+    )
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": new_user["id"],
+            "email": new_user["email"],
+            "full_name": new_user["full_name"],
+            "is_active": new_user["is_active"]
+        }
+    }
+
+@app.get("/api/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: dict = Depends(get_current_active_user)):
+    """Get current user information"""
+    return current_user
+
+@app.post("/api/auth/logout")
+async def logout():
+    """Logout endpoint (client should remove token)"""
+    return {"message": "Successfully logged out"}
 
 # CoinGecko API configuration
 COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
