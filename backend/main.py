@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import requests
+import os
+from dotenv import load_dotenv
 try:
     import pandas as pd
     import numpy as np
@@ -16,6 +18,9 @@ import asyncio
 from typing import List, Dict, Optional
 import json
 from auth import AuthService, get_current_active_user, ACCESS_TOKEN_EXPIRE_MINUTES
+
+# Load environment variables
+load_dotenv()
 
 app = FastAPI(title="Crypto Dashboard API", version="1.0.0")
 
@@ -129,16 +134,17 @@ async def logout():
     return {"message": "Successfully logged out"}
 
 # CoinGecko API configuration
-COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
-COINGECKO_API_KEY = "CG-5VhkXfcW7gnqegfBnxFSiwv3"
+COINGECKO_BASE_URL = os.getenv("COINGECKO_API_URL", "https://api.coingecko.com/api/v3")
+COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY")
 
 class CryptoService:
     def __init__(self):
         self.session = requests.Session()
-        # Set API key header
-        self.session.headers.update({
-            'x-cg-demo-api-key': COINGECKO_API_KEY
-        })
+        # Set API key header if available
+        if COINGECKO_API_KEY:
+            self.session.headers.update({
+                'x-cg-demo-api-key': COINGECKO_API_KEY
+            })
     
     async def get_market_data(self, coins: str = "bitcoin,ethereum,cardano,polkadot,chainlink", vs_currency: str = "usd"):
         """Get real-time market data for specified coins"""
